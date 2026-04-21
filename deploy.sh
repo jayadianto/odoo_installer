@@ -453,6 +453,10 @@ fi
 
 prompt_yes_no  INSTALL_WKHTMLTOPDF  "Install wkhtmltopdf?"  "y"
 
+# Auto-extract subdomain for DB name preview
+AUTO_DB_NAME=$(echo "$WEBSITE_NAME" | sed "s/.${ROOT_DOMAIN}//")
+prompt_yes_no  AUTO_CREATE_DB  "Auto create database '${AUTO_DB_NAME}'?"  "y"
+
 # ====================================================================
 # STEP 6: Review Summary
 # ====================================================================
@@ -524,6 +528,7 @@ sed -i.bak "s|^PGBOUNCER_PORT=.*|PGBOUNCER_PORT=\"${PGBOUNCER_PORT}\"|" "$TEMP_S
 sed -i.bak "s|^PGBOUNCER_POOL_MODE=.*|PGBOUNCER_POOL_MODE=\"${PGBOUNCER_POOL_MODE}\"|" "$TEMP_SCRIPT"
 sed -i.bak "s|^PGBOUNCER_MAX_CLIENT_CONN=.*|PGBOUNCER_MAX_CLIENT_CONN=\"${PGBOUNCER_MAX_CLIENT_CONN}\"|" "$TEMP_SCRIPT"
 sed -i.bak "s|^PGBOUNCER_DEFAULT_POOL_SIZE=.*|PGBOUNCER_DEFAULT_POOL_SIZE=\"${PGBOUNCER_DEFAULT_POOL_SIZE}\"|" "$TEMP_SCRIPT"
+sed -i.bak "s|^AUTO_CREATE_DB=.*|AUTO_CREATE_DB=\"${AUTO_CREATE_DB}\"|" "$TEMP_SCRIPT"
 
 # Remove sed backup files
 rm -f "${TEMP_SCRIPT}.bak"
@@ -639,17 +644,27 @@ echo -e "${GREEN}║              🎉 DEPLOYMENT COMPLETE! 🎉                
 echo -e "${GREEN}║                                                            ║${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  Access your Odoo:                                         ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    🌐 https://${WEBSITE_NAME}                               ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    🔧 http://${SERVER_IP}:${OE_PORT} (direct)                ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}Access your Odoo:${NC}                                        ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    🌐 https://${WEBSITE_NAME}${NC}"
+echo -e "${GREEN}║${NC}    🔧 http://${SERVER_IP}:${OE_PORT} (direct)${NC}"
 echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  SSH to server:                                            ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    ssh -i ${SSH_KEY} -p ${SSH_PORT} ${SSH_TARGET}            ${GREEN}║${NC}"
+
+if [ "$AUTO_CREATE_DB" = "True" ]; then
+    # Retrieve the admin password from server
+    REMOTE_ADMIN_PASS=$(ssh $SSH_OPTS "$SSH_TARGET" "grep ^admin_passwd /etc/odoo-server.conf 2>/dev/null | awk -F' = ' '{print \$2}'" 2>/dev/null || echo "(check /etc/odoo-server.conf)")
+    echo -e "${GREEN}║${NC}  ${BOLD}Database:${NC}                                                ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}    DB Name       : ${CYAN}${AUTO_DB_NAME}${NC}"
+    echo -e "${GREEN}║${NC}    Admin Password: ${CYAN}${REMOTE_ADMIN_PASS}${NC}"
+    echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
+fi
+
+echo -e "${GREEN}║${NC}  ${BOLD}SSH to server:${NC}                                           ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    ssh -i ${SSH_KEY} -p ${SSH_PORT} ${SSH_TARGET}${NC}"
 echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  Service commands (on server):                             ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    sudo systemctl restart odoo-server                      ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    sudo systemctl status odoo-server                       ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    tail -f /var/log/odoo/odoo-server.log                   ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}Service commands (on server):${NC}                             ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    sudo systemctl restart odoo-server${NC}"
+echo -e "${GREEN}║${NC}    sudo systemctl status odoo-server${NC}"
+echo -e "${GREEN}║${NC}    tail -f /var/log/odoo/odoo-server.log${NC}"
 echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""

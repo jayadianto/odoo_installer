@@ -67,6 +67,9 @@ PGBOUNCER_POOL_MODE="transaction"
 PGBOUNCER_MAX_CLIENT_CONN="200"
 PGBOUNCER_DEFAULT_POOL_SIZE="20"
 
+# ---- Auto Create Database ----
+AUTO_CREATE_DB="True"
+
 # ---- Workers (for production) ----
 # Set 0 for development, (2 * CPU_CORES) + 1 for production
 OE_WORKERS="0"
@@ -844,28 +847,33 @@ fi
 ##############################################################################
 # 16. CREATE ODOO DATABASE
 ##############################################################################
-print_header "16. Create Odoo Database: ${OE_DB_NAME}"
+if [ "$AUTO_CREATE_DB" = "True" ]; then
+    print_header "16. Create Odoo Database: ${OE_DB_NAME}"
 
-print_step "Initializing database '${OE_DB_NAME}' (this may take 1-3 minutes)..."
+    print_step "Initializing database '${OE_DB_NAME}' (this may take 1-3 minutes)..."
 
-# Create and initialize the database using odoo-bin
-# --stop-after-init: exits after initializing so we can start the service normally after
-sudo su - ${OE_USER} -c "${VENV_PYTHON} ${OE_HOME_EXT}/odoo-bin \
-    -c /etc/${OE_CONFIG}.conf \
-    -d ${OE_DB_NAME} \
-    -i base \
-    --without-demo=all \
-    --stop-after-init" 2>&1 | tail -5
+    # Create and initialize the database using odoo-bin
+    # --stop-after-init: exits after initializing so we can start the service normally after
+    sudo su - ${OE_USER} -c "${VENV_PYTHON} ${OE_HOME_EXT}/odoo-bin \\
+        -c /etc/${OE_CONFIG}.conf \\
+        -d ${OE_DB_NAME} \\
+        -i base \\
+        --without-demo=all \\
+        --stop-after-init" 2>&1 | tail -5
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Database '${OE_DB_NAME}' created successfully.${NC}"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Database '${OE_DB_NAME}' created successfully.${NC}"
+    else
+        print_warning "Database creation may have encountered issues. Check logs."
+    fi
+
+    # Update Odoo config to filter to this database
+    sudo sed -i "s|; db_name = False|db_name = ${OE_DB_NAME}|" /etc/${OE_CONFIG}.conf
+    sudo sed -i "s|; db_filter = .*|db_filter = ^${OE_DB_NAME}\$|" /etc/${OE_CONFIG}.conf
 else
-    print_warning "Database creation may have encountered issues. Check logs."
+    print_header "16. Skip Database Creation (user choice)"
+    print_step "Database will not be auto-created. You can create it from the Odoo web interface."
 fi
-
-# Update Odoo config to filter to this database
-sudo sed -i "s|; db_name = False|db_name = ${OE_DB_NAME}|" /etc/${OE_CONFIG}.conf
-sudo sed -i "s|; db_filter = .*|db_filter = ^${OE_DB_NAME}$|" /etc/${OE_CONFIG}.conf
 
 print_step "Starting Odoo service"
 sudo systemctl start ${OE_CONFIG}.service
