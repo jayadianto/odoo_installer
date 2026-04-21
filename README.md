@@ -1,14 +1,15 @@
 # Odoo Deployment Tool
 
-Deploy Odoo 17/18/19 ke server Ubuntu dari Mac/Linux lokal via SSH.
+Deploy Odoo 15-19 ke server Ubuntu dari Mac/Linux lokal via SSH.
 
 ## Fitur
 
-- ✅ Support **Odoo 17, 18, 19** (Community & Enterprise)
+- ✅ Support **Odoo 15, 16, 17, 18, 19** (Community & Enterprise)
 - ✅ **Python Virtual Environment** — tidak menggunakan system pip
 - ✅ **PostgreSQL 16** + **PgBouncer** (connection pooling)
 - ✅ **Nginx** reverse proxy + virtual host
 - ✅ **Cloudflare SSL** (wildcard/general certificate per root domain)
+- ✅ **Auto-update DNS Cloudflare** (A Record / CNAME via API)
 - ✅ **Systemd service** — modern service management
 - ✅ **Deploy dari lokal** — jalankan di Mac, otomatis SSH ke server
 
@@ -105,11 +106,15 @@ Script akan memandu Anda secara interaktif:
   Install Enterprise? [n]      : n
   Workers (0=dev) [0]          : 0
 
-━━━ 3. Cloudflare SSL Certificates ━━━
+━━━ 3. Cloudflare DNS & SSL Certificates ━━━
 
   Root Domain (for SSL folder) [xerpium.com] : xerpium.com
   ✓ SSL certificate : ssl/cloudflare_origin.pem
   ✓ SSL private key : ssl/cloudflare_origin.key
+
+  Cloudflare API Token (kosongkan jika skip setting DNS) : <paste_api_token_disini>
+  ⟳ Configuring Cloudflare DNS for erp.xerpium.com...
+  ✓ Cloudflare DNS Configured: CNAME created
 
 ━━━ 4. PgBouncer Configuration ━━━
 
@@ -125,10 +130,11 @@ Script akan memandu Anda secara interaktif:
 ```
 
 Script kemudian akan:
-1. Upload `odoo_install.sh` ke server
-2. Upload SSL certificate ke `/etc/ssl/cloudflare/<root_domain>/`
-3. SSH dan jalankan instalasi (output ditampilkan real-time)
-4. Verifikasi semua service berjalan
+1. Update DNS di Cloudflare jika API token diberikan (idempotent, otomatis mendeteksi A/CNAME yang tepat)
+2. Upload `odoo_install.sh` ke server
+3. Upload SSL certificate ke `/etc/ssl/cloudflare/<root_domain>/`
+4. SSH dan jalankan instalasi (output ditampilkan real-time)
+5. Verifikasi semua service berjalan
 
 ## Setelah Deploy
 

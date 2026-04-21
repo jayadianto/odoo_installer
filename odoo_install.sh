@@ -103,11 +103,11 @@ print_error() {
 
 # ---- Validate Odoo version ----
 case "$OE_VERSION" in
-    17.0|18.0|19.0)
+    15.0|16.0|17.0|18.0|19.0)
         echo -e "${GREEN}Installing Odoo version: ${OE_VERSION}${NC}"
         ;;
     *)
-        print_error "Unsupported Odoo version: $OE_VERSION. Supported versions: 17.0, 18.0, 19.0"
+        print_error "Unsupported Odoo version: $OE_VERSION. Supported versions: 15.0, 16.0, 17.0, 18.0, 19.0"
         exit 1
         ;;
 esac
@@ -441,13 +441,7 @@ sudo su - $OE_USER -c "${VENV_PIP} install -r https://raw.githubusercontent.com/
 # Version-specific dependencies
 print_step "Installing version-specific dependencies for Odoo ${OE_VERSION}"
 case "$OE_VERSION" in
-    17.0)
-        sudo su - $OE_USER -c "${VENV_PIP} install phonenumbers pyopenssl psycopg2-binary"
-        ;;
-    18.0)
-        sudo su - $OE_USER -c "${VENV_PIP} install phonenumbers pyopenssl psycopg2-binary"
-        ;;
-    19.0)
+    15.0|16.0|17.0|18.0|19.0)
         sudo su - $OE_USER -c "${VENV_PIP} install phonenumbers pyopenssl psycopg2-binary"
         ;;
 esac

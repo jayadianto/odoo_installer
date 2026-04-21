@@ -39,7 +39,7 @@ print_banner() {
     echo "║                                                            ║"
     echo "║           ODOO DEPLOYMENT TOOL - VITRAINING                ║"
     echo "║                                                            ║"
-    echo "║   Deploy Odoo 17/18/19 to remote Ubuntu server via SSH     ║"
+    echo "║   Deploy Odoo 15-19 to remote Ubuntu server via SSH        ║"
     echo "║                                                            ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -177,6 +177,35 @@ check_prerequisites() {
         exit 1
     fi
     print_step "scp available"
+
+    # Check jq available (needed for Cloudflare API)
+    if ! command -v jq &>/dev/null; then
+        print_info "jq not found. Installing jq..."
+        if [[ "$(uname)" == "Darwin" ]]; then
+            # macOS: try brew, then curl binary
+            if command -v brew &>/dev/null; then
+                brew install jq
+            else
+                echo -e "  ${YELLOW}⚠  brew not found. Downloading jq binary...${NC}"
+                JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-amd64"
+                if [[ "$(uname -m)" == "arm64" ]]; then
+                    JQ_URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64"
+                fi
+                curl -sL "$JQ_URL" -o /usr/local/bin/jq 2>/dev/null || curl -sL "$JQ_URL" -o "${SCRIPT_DIR}/jq"
+                chmod +x /usr/local/bin/jq 2>/dev/null || chmod +x "${SCRIPT_DIR}/jq"
+                export PATH="${SCRIPT_DIR}:$PATH"
+            fi
+        else
+            sudo apt-get install -y jq 2>/dev/null || sudo yum install -y jq 2>/dev/null || true
+        fi
+        if command -v jq &>/dev/null; then
+            print_step "jq installed successfully"
+        else
+            print_error "Could not install jq. Cloudflare DNS update will be skipped."
+        fi
+    else
+        print_step "jq available"
+    fi
 }
 
 # ---- Test SSH connection ----
@@ -254,7 +283,7 @@ fi
 # ====================================================================
 print_section "2. Odoo Configuration"
 
-prompt_choice  OE_VERSION      "Odoo Version"           "17 18 19"  "19"
+prompt_choice  OE_VERSION      "Odoo Version"           "15 16 17 18 19"  "18"
 OE_VERSION="${OE_VERSION}.0"
 
 prompt_input   WEBSITE_NAME    "Domain Name"            "odoo.example.com"
@@ -264,9 +293,9 @@ prompt_yes_no  IS_ENTERPRISE   "Install Enterprise?"    "n"
 prompt_input   OE_WORKERS      "Workers (0=dev)"        "0"
 
 # ====================================================================
-# STEP 3: SSL Certificates (auto-detect from ssl/ folder)
+# STEP 3: SSL Certificates & Cloudflare DNS
 # ====================================================================
-print_section "3. Cloudflare SSL Certificates"
+print_section "3. Cloudflare DNS & SSL Certificates"
 
 # Auto-detect root domain
 AUTO_ROOT_DOMAIN=$(echo "$WEBSITE_NAME" | awk -F. '{if(NF>=2) print $(NF-1)"."$NF; else print $0}')
@@ -322,6 +351,82 @@ echo ""
 echo -e "  ${BLUE}ℹ${NC} Will be uploaded to server at:"
 echo -e "     /etc/ssl/cloudflare/${ROOT_DOMAIN}/cloudflare_origin.pem"
 echo -e "     /etc/ssl/cloudflare/${ROOT_DOMAIN}/cloudflare_origin.key"
+echo ""
+
+# Cloudflare DNS Update
+prompt_input CLOUDFLARE_API_TOKEN "Cloudflare API Token (kosongkan jika skip setting DNS)" ""
+
+if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+    if ! command -v jq &>/dev/null; then
+        print_error "'jq' command is required for Cloudflare API. Skipping DNS update."
+    else
+        print_progress "Configuring Cloudflare DNS for ${WEBSITE_NAME}..."
+        
+        ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=${ROOT_DOMAIN}" \
+          -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+          -H "Content-Type: application/json" | jq -r '.result[0].id')
+        
+        if [ -z "$ZONE_ID" ] || [ "$ZONE_ID" == "null" ]; then
+            print_error "Cloudflare Zone not found for ${ROOT_DOMAIN}. Please check API Token."
+        else
+            # Check existing A record with the exact same server IP
+            A_RECORD=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=A&content=$SERVER_IP" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json")
+            A_NAME=$(echo "$A_RECORD" | jq -r '.result[0].name')
+            
+            # Check existing record for the subdomain
+            EXISTING=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$WEBSITE_NAME" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json")
+            RECORD_ID=$(echo "$EXISTING" | jq -r '.result[0].id')
+            RECORD_TYPE=$(echo "$EXISTING" | jq -r '.result[0].type')
+            CURRENT_CONTENT=$(echo "$EXISTING" | jq -r '.result[0].content')
+            
+            if [ "$A_NAME" != "null" ] && [ -n "$A_NAME" ]; then
+                TARGET_TYPE="CNAME"
+                TARGET_CONTENT="$A_NAME"
+                echo -e "  ${BLUE}ℹ${NC} Will use CNAME -> $A_NAME for $SERVER_IP"
+            else
+                TARGET_TYPE="A"
+                TARGET_CONTENT="$SERVER_IP"
+                echo -e "  ${BLUE}ℹ${NC} Will use A -> $SERVER_IP"
+            fi
+            
+            if [ "$RECORD_ID" == "null" ] || [ -z "$RECORD_ID" ] || [ "$RECORD_ID" == "" ]; then
+                echo -e "  ${BLUE}ℹ${NC} DNS Record not found. Creating..."
+                curl -s -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+                    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    --data "{
+                      \"type\": \"$TARGET_TYPE\",
+                      \"name\": \"$WEBSITE_NAME\",
+                      \"content\": \"$TARGET_CONTENT\",
+                      \"ttl\": 1,
+                      \"proxied\": true
+                    }" > /dev/null
+                print_step "Cloudflare DNS Configured: $TARGET_TYPE created"
+            else
+                if [[ "$RECORD_TYPE" == "$TARGET_TYPE" && "$CURRENT_CONTENT" == "$TARGET_CONTENT" ]]; then
+                    print_step "Cloudflare DNS Record is already up-to-date ($TARGET_TYPE -> $TARGET_CONTENT)"
+                else
+                    echo -e "  ${YELLOW}⚠${NC} Existing record is different. Updating..."
+                    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+                        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                        -H "Content-Type: application/json" \
+                        --data "{
+                          \"type\": \"$TARGET_TYPE\",
+                          \"name\": \"$WEBSITE_NAME\",
+                          \"content\": \"$TARGET_CONTENT\",
+                          \"ttl\": 1,
+                          \"proxied\": true
+                        }" > /dev/null
+                    print_step "Cloudflare DNS Configured: updated to $TARGET_TYPE -> $TARGET_CONTENT"
+                fi
+            fi
+        fi
+    fi
+fi
 
 # ====================================================================
 # STEP 4: PgBouncer Configuration
